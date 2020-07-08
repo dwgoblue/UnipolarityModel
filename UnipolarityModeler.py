@@ -53,17 +53,18 @@ def CrankNicolson(intW, V, Ut):
 
 
 # Droplet constitutes
-def dxdt(binding, dt, C, B, n, p, kH, ks, kp, kd, kb, L, x, u, m):
+def dxdt(binding, dt, C, q, n, p, kH, ks, kp, kd, kb, L, x, u, m):
+    # Switch ON membrane association behavior.
     if binding=='ON':
         # Position-dependent functions.
         if x == 0:
-            udot = kp-kd*u-2*((u**2)*(1-m/p)*(B+C*m**n/(kH**n+m**n))-ks*m)
-            mdot = (u**2)*(1-m/p)*(B+C*m**n/(kH**n+m**n))-ks*m
+            udot = kp-kd*u-q*((u**q)*(1-m/p)*kb*(C+((1-C)*m**n)/(kH**n+m**n))-ks*m)
+            mdot = (u**q)*(1-m/p)*kb*(C+((1-C)*m**n)/(kH**n+m**n))-ks*m
         elif x==9:
-            udot = -kd*u-2*((u**2)*(1-m/p)*(B+C*m**n/(kH**n+m**n))-ks*m)
-            mdot = (u**2)*(1-m/p)*(B+C*m**n/(kH**n+m**n))-ks*m
+            udot = -kd*u-q*((u**q)*(1-m/p)*kb*(C+((1-C)*m**n)/(kH**n+m**n))-ks*m)
+            mdot = (u**q)*(1-m/p)*kb*(C+((1-C)*m**n)/(kH**n+m**n))-ks*m
         else:
-            udot = -kd*u-2*(-ks*m)
+            udot = -kd*u-q*(-ks*m)
             mdot = -ks*m
     else: #OFF
     # Without membrane binding effect
@@ -73,7 +74,23 @@ def dxdt(binding, dt, C, B, n, p, kH, ks, kp, kd, kb, L, x, u, m):
     return dt*udot, dt*mdot
 
 
-def main(para):
+def main(para, output_format='all'):
+    """
+    Args:
+        para (array): Tunable parameters for simulation of different conditions.
+        ::para[0] <-- mss:: steady-state concentration of the membrane-bound form.
+        ::para[1] <-- uss:: steady-state concentration of the diffuse form.
+        ::para[2] <-- kd:: degradation kinetic rate for the diffuse form.
+        ::para[3] <-- ks:: dissociation kinetic rate for the membrane-bound form.
+        
+        output_format (string): Selections of output format.
+        ::all (default):: records of the distribution arrays of the two forms by time.
+        ::last:: records of the distribution array at the last time point.
+        ::poles:: records of the concentrations of the two forms at two cell poles by time.
+        
+    Returns:
+        beta: Float, learning outputs.
+    """
     
     # Steady state values for m and u.
     mss = para[2]
@@ -85,17 +102,18 @@ def main(para):
     size = 2 #2um ecoli
     L = 10 #grids.
     C = 10*15.85 # fraction of cytoplasmic constitutes.
-    p = 50
-    n = 6
+    p = 50 # capacity
+    n = 6 # Hill coefficient
+    q = 1 # Change this para when the membrane form of protein is multimer.
     dx = size/L #unit um
     dt = 10**(-3) # step size, unit: s
-    steps = 3600*(10**3) #total time: 60 mins
+    steps = int(3600/dt) #total time: 60 mins
     # Reaction parameter setting
     kd = para[0]
     kp = kd*uss
     ks = para[1]
-    B = ks*(mss/(uss**2))
-    kH = 1
+    kb = ks*(mss/uss)
+    kH = 1 # EC50 for membrane binding.
     
     # Initialize ut, mt which should be a Lx1 array.
     ut = np.zeros((L, 1))
@@ -128,7 +146,7 @@ def main(para):
         Diff_u = CrankNicolson(intW, V, ut[:, 0])
         for i in range(L):
             # Initiate reactions
-            _RK_ = dxdt('ON', dt, C, B, n, p, kH, ks, kp, kd, kb[i], L, i, ut[i, 0], mt[i, 0])
+            _RK_ = dxdt('ON', dt, C, q, n, p, kH, ks, kp, kd, kb, L, x, ut[i, 0], mt[i, 0])
             ut_tmp[i, 0] = ut[i, 0]+_RK_[0]+Diff_u[i]
             mt_tmp[i, 0] = mt[i, 0]+_RK_[1]
             
@@ -139,21 +157,29 @@ def main(para):
             print('ut', ut_tmp)
             print('mt', mt_tmp)
             print(step)
-            #return {'u':ut, 'm':mt} # last time point.
-            #return (ut[0, 0], mt[0, 0], ut[-1, 0], mt[-1, 0], step) # only the first and the last grids.
-            return {'u':uU, 'm':mU} # All time points.
+            if input_format=='last':
+                return {'u':ut, 'm':mt} # the last time point.
+            elif input_format=='poles':
+                return (ut[0, 0], mt[0, 0], ut[-1, 0], mt[-1, 0], step) # only the first and the last grids.
+            elif input_format=='all':
+                return {'u':uU, 'm':mU} # All time points.
+            else:
+                raise EOFError
             sys.exit()
         
         ut = ut_tmp
         mt = mt_tmp
-        ud[step+1] = (ut[0, 0]+mt[0, 0])/(ut[-1, 0]+mt[-1, 0])
         uU[:, step+1] = ut[:, 0]
         mU[:, step+1] = mt[:, 0]
         
-    #return {'u':ud}
-    #return {'u':ut, 'm':mt} # last time point.
-    return {'u':uU, 'm':mU} # All time points.
-    #return (ut[0, 0], mt[0, 0], ut[-1, 0], mt[-1, 0], step)  # only the first and the last grids.
+        if input_format=='last':
+             return {'u':ut, 'm':mt} # the last time point.
+        elif input_format=='poles':
+            return (ut[0, 0], mt[0, 0], ut[-1, 0], mt[-1, 0], step) # only the first and the last grids.
+        elif input_format=='all':
+            return {'u':uU, 'm':mU} # All time points.
+        else:
+            raise EOFError
 	
 """
 The functions below are not necessary. Execute the functions only when you plan to scan parameters by parallel computating.
